@@ -2,6 +2,8 @@
 from collections import deque
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -55,12 +57,8 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Gak ada chat. Ketik /cari")
         return
     partner = sessions[uid]
-
-    # Forward text
     if update.message.text:
         await ctx.bot.send_message(partner, update.message.text)
-
-    # Forward photo but also save it
     elif update.message.photo:
         file = await update.message.photo[-1].get_file()
         os.makedirs("foto", exist_ok=True)
@@ -68,11 +66,22 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(fname)
         logging.info(f"FOTO DISIMPAN: {fname} dari user {uid}")
         await ctx.bot.send_photo(partner, update.message.photo[-1].file_id)
-
     elif update.message.sticker:
         await ctx.bot.send_sticker(partner, update.message.sticker.file_id)
 
+def run_http():
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"alive")
+        def log_message(self, *a):
+            pass
+    HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8000))), H).serve_forever()
+
 def main():
+    t = threading.Thread(target=run_http, daemon=True)
+    t.start()
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cari", cari))
