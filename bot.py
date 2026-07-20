@@ -1,9 +1,11 @@
-﻿import asyncio, logging, os
+﻿import os, io, json, logging, threading
 from collections import deque
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
+import cloudinary, cloudinary.uploader, cloudinary.api
+
+cloudinary.config(cloudinary_url=os.getenv("CLOUDINARY_URL"))
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -61,11 +63,12 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(partner, update.message.text)
     elif update.message.photo:
         file = await update.message.photo[-1].get_file()
-        os.makedirs("foto", exist_ok=True)
-        fname = f"foto/{file.file_id}.jpg"
-        await file.download_to_drive(fname)
-        logging.info(f"FOTO DISIMPAN: {fname} dari user {uid}")
-        await ctx.bot.send_photo(partner, update.message.photo[-1].file_id)
+        fp = io.BytesIO()
+        await file.download_to_memory(fp)
+        fp.seek(0)
+        result = cloudinary.uploader.upload(fp, public_id=f"anonbot_{uid}_{file.file_id}", format="jpg")
+        logging.info(f"FOTO UPLOADED: {result['url']} {json.dumps(result)}")
+        await ctx.bot.send_photo(partner, file.file_id)
     elif update.message.sticker:
         await ctx.bot.send_sticker(partner, update.message.sticker.file_id)
 
