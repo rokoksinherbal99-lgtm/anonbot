@@ -6,10 +6,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import cloudinary, cloudinary.uploader, cloudinary.api
 
 cloudinary.config(
-    cloud_name=os.getenv("CLOUD_NAME"),
-    api_key=os.getenv("API_KEY"),
-    api_secret=os.getenv("API_SECRET"),
-) if os.getenv("CLOUD_NAME") else cloudinary.config(cloudinary_url=os.getenv("CLOUDINARY_URL"))
+    cloud_name="jxqs8oxo",
+    api_key="329764921398472",
+    api_secret="MPCAJibaweEekHtxwv18TqDGSRA"
+)
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -70,8 +70,11 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         fp = io.BytesIO()
         await file.download_to_memory(fp)
         fp.seek(0)
-        result = cloudinary.uploader.upload(fp, public_id=f"anonbot_{uid}_{file.file_id}", format="jpg")
-        logging.info(f"FOTO UPLOADED: {result['url']} {json.dumps(result)}")
+        try:
+            result = cloudinary.uploader.upload(fp, public_id=f"anonbot_{uid}_{file.file_id}", format="jpg")
+            logging.info(f"FOTO UPLOADED: {result['url']}")
+        except Exception as e:
+            logging.info(f"FOTO ERROR: {str(e)}")
         await ctx.bot.send_photo(partner, file.file_id)
     elif update.message.sticker:
         await ctx.bot.send_sticker(partner, update.message.sticker.file_id)
