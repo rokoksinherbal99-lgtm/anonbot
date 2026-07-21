@@ -1,5 +1,6 @@
 ﻿import os, io, json, logging, threading, asyncio
 from collections import deque
+from dataclasses import dataclass
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -15,19 +16,61 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
 queue = deque()
 sessions = {}
-waiting = {}  # uid -> asyncio.Event
+waiting = {}
+profiles = {}
+
+@dataclass
+class Profile:
+    name: str
+    gender: str  # L/P
+    age: int
+
+def get_profile(uid):
+    return profiles.get(uid)
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Anonymous Chat Bot\n"
         "/cari - Cari partner ngobrol\n"
         "/stop - Berhenti ngobrol\n"
+        "/profil - Atur profil kamu\n"
         "/next - Cari partner baru\n\n"
-        "Auto-match setiap 5 detik!",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("Cari Partner", callback_data="cari")
-        ]])
-    )
+        "Auto-match setiap 5 detik!")
+    
+async def profil(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    p = get_profile(uid)
+    if p:
+        msg = f"Profilmu: {p.name}, {p.gender}, {p.age} tahun"
+    else:
+        msg = "Profil belum diatur."
+    msg += "\n\nAtur profil dengan /set nama,gender,usia"
+    msg += "\nContoh: /set Eren,L,25"
+    await update.message.reply_text(msg)
+
+async def setprof(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    text = update.message.text.replace("/set ", "", 1).strip()
+    parts = text.split(",")
+    if len(parts) != 3:
+        await update.message.reply_text("Format: /set nama,gender,usia\nContoh: /set Eren,L,25")
+        return
+    name = parts[0].strip()
+    gender = parts[1].strip().upper()
+    if gender not in ("L", "P"):
+        await update.message.reply_text("Gender harus L (laki-laki) atau P (perempuan)")
+        return
+    try:
+        age = int(parts[2].strip())
+    except ValueError:
+        await update.message.reply_text("Usia harus angka")
+        return
+    if not (1 <= age <= 120):
+        await update.message.reply_text("Usia must 1-120")
+        return
+    profiles[uid] = Profile(name=name, gender=gender, age=age)
+    await update.message.reply_text(f"Profil disimpan! {name}, {gender}, {age}")
+    logging.info(f"PROFILE SAVED: {uid} -> {name} {gender} {age}")
 
 async def cari(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -155,6 +198,8 @@ def main():
     app.add_handler(CommandHandler("cari", cari))
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("next", next_cmd))
+    app.add_handler(CommandHandler("profil", profil))
+    app.add_handler(CommandHandler("set", setprof))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
     app.add_handler(MessageHandler(filters.PHOTO, handle_msg))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_msg))
