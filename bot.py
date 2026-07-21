@@ -1,7 +1,7 @@
-﻿import os, io, json, logging, threading
+﻿import os, io, json, logging, threading, asyncio
 from collections import deque
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import cloudinary, cloudinary.uploader, cloudinary.api
 
@@ -15,14 +15,18 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
 queue = deque()
 sessions = {}
+waiting = {}  # uid -> asyncio.Event
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
     await update.message.reply_text(
         "Anonymous Chat Bot\n"
         "/cari - Cari partner ngobrol\n"
         "/stop - Berhenti ngobrol\n"
-        "/next - Cari partner baru"
+        "/next - Cari partner baru\n\n"
+        "Auto-match setiap 5 detik!",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("Cari Partner", callback_data="cari")
+        ]])
     )
 
 async def cari(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -37,11 +41,23 @@ async def cari(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         partner = queue.popleft()
         sessions[uid] = partner
         sessions[partner] = uid
+        ev = waiting.pop(partner, None)
+        if ev: ev.set()
         await ctx.bot.send_message(uid, "Bertemu! Kirim pesan.")
         await ctx.bot.send_message(partner, "Bertemu! Kirim pesan.")
     else:
         queue.append(uid)
-        await update.message.reply_text("Antre... nunggu partner.")
+        ev = asyncio.Event()
+        waiting[uid] = ev
+        await update.message.reply_text("Antre... auto-match dalam 5 detik.")
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            await update.message.reply_text("Belum ada partner. Coba /cari lagi.")
+            queue.discard(uid)
+            waiting.pop(uid, None)
+        else:
+            pass  # matched
 
 async def stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -51,16 +67,58 @@ async def stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(partner, "Partner mengakhiri chat.")
         await update.message.reply_text("Chat diakhiri.")
     else:
+        queue.discard(uid)
+        waiting.pop(uid, None)
         await update.message.reply_text("Gak ada chat aktif.")
 
 async def next_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await stop(update, ctx)
     await cari(update, ctx)
 
+async def button_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "cari":
+        uid = query.from_user.id
+        if uid in sessions:
+            await query.edit_message_text("Lo masih ngobrol. Ketik /stop dulu.")
+            return
+        if uid in queue:
+            await query.edit_message_text("Lo udah di antrean.")
+            return
+        if queue:
+            partner = queue.popleft()
+            sessions[uid] = partner
+            sessions[partner] = uid
+            ev = waiting.pop(partner, None)
+            if ev: ev.set()
+            await ctx.bot.send_message(uid, "Bertemu! Kirim pesan.")
+            await ctx.bot.send_message(partner, "Bertemu! Kirim pesan.")
+            await query.edit_message_text("Bertemu! Kirim pesan.")
+        else:
+            queue.append(uid)
+            ev = asyncio.Event()
+            waiting[uid] = ev
+            await query.edit_message_text("Antre... auto-match.")
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                await query.edit_message_text("Belum ada partner. Klik tombol lagi.", 
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Cari Lagi", callback_data="cari")
+                    ]]))
+                queue.discard(uid)
+                waiting.pop(uid, None)
+            else:
+                await query.edit_message_text("Bertemu! Kirim pesan.")
+
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if uid not in sessions:
-        await update.message.reply_text("Gak ada chat. Ketik /cari")
+        await update.message.reply_text("Gak ada chat. Ketik /cari",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Cari Partner", callback_data="cari")
+            ]]))
         return
     partner = sessions[uid]
     if update.message.text:
@@ -100,6 +158,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
     app.add_handler(MessageHandler(filters.PHOTO, handle_msg))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_msg))
+    app.add_handler(CallbackQueryHandler(button_cb))
     print("Bot jalan...")
     app.run_polling()
 
