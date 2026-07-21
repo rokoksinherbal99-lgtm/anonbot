@@ -5,7 +5,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import cloudinary, cloudinary.uploader, cloudinary.api
 
-cloudinary.config(cloudinary_url=os.getenv("CLOUDINARY_URL"))
+cloudinary.config(
+    cloud_name=os.getenv("CLOUD_NAME"),
+    api_key=os.getenv("API_KEY"),
+    api_secret=os.getenv("API_SECRET"),
+) if os.getenv("CLOUD_NAME") else cloudinary.config(cloudinary_url=os.getenv("CLOUDINARY_URL"))
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
